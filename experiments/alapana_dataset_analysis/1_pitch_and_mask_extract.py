@@ -124,7 +124,7 @@ from convert import *
 from exploration.pitch import *
 from exploration.io import *
 
-run_keyword= 'alapana_spleet'
+run_keyword = 'alapana_spleet'
 
 cache_dir = "cache"
 cuda = False

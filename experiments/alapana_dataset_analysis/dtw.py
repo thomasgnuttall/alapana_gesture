@@ -1,7 +1,7 @@
 from tslearn.utils import to_time_series
 import numpy as np
 from numba import njit, prange
-from dtaidistance import dtw
+from dtaidistance import dtw, dtw_ndim
 
 def line(x0, y0, x1, y1):
         "Bresenham's line algorithm"
@@ -168,8 +168,47 @@ def dtw_path(s1, s2, radius):
     mask = sc_mask(sz1, sz2, radius=radius)
 
     acc_cost_mat = njit_accumulated_matrix(s1, s2, mask=mask)
-    path = _return_path(acc_cost_mat)
-    return path, np.sqrt(acc_cost_mat[-1, -1])
+
+    (sx, sy), (ex, ey) =  _start_end_ix(s1, s2, radius)
+
+    acc_cost_cut = acc_cost_mat[sx:ex+1,sy:ey+1]
+
+    path = _return_path(acc_cost_cut)
+
+    path = np.array([[x+sx, y+sy] for x,y in path])
+
+    dtw_val = path_to_distance(s1, s2, path)
+
+    return path, dtw_val
+
+
+@njit()
+def path_to_distance(s1, s2, path):
+    distances = np.abs(s1[path[:, 0]] - s2[path[:, 1]]) ** 2
+    dtw_val = np.sqrt(np.sum(distances))
+    return dtw_val
+
+
+def _start_end_ix(s1, s2, r):
+
+    s1l = len(s1)
+    s2l = len(s2)
+
+    starting_zone = njit_dist_matrix(s1[:r], s2[:r])
+    ending_zone = njit_dist_matrix(s1[-r:], s2[-r:])
+    
+    # automatically takes earliest index (top left of array)
+    sz1, sz2 = np.unravel_index(np.argmin(starting_zone, axis=None), starting_zone.shape)
+
+    # Ensure we get latest index (botom right of array)
+    exmin, eymin = np.where(ending_zone==np.min(ending_zone))
+    ez1, ez2 = exmin[-1], eymin[-1]
+
+    # Convert to indices in original arrays
+    s1f = s1l-r+ez1
+    s2f = s2l-r+ez2
+
+    return (sz1, sz2), (s1f, s2f)
 
 
 @njit()
@@ -240,7 +279,44 @@ def njit_accumulated_matrix(s1, s2, mask):
     return cum_sum[1:, 1:]
 
 
+@njit()
+def njit_dist_matrix(s1, s2):
+    """Compute the cost matrix score between two time series.
+
+    Parameters
+    ----------
+    s1 : array, shape = (sz1,)
+        First time series.
+
+    s2 : array, shape = (sz2,)
+        Second time series
+
+    Returns
+    -------
+    mat : array, shape = (sz1, sz2)
+        cost matrix.
+
+    """
+    l1 = s1.shape[0]
+    l2 = s2.shape[0]
+    
+    dists = np.zeros((l1, l2))
+
+    for i in range(l1):
+        for j in range(l2):
+            sd = _local_squared_dist(s1[i], s2[j])
+            dists[i, j] = sd
+
+    return dists
+
+
 def dtw_dtai(pat1, pat2, r):
+
+    if not isinstance(pat1, np.ndarray):
+        pat1 = np.array(pat1)
+    
+    if not isinstance(pat2, np.ndarray):
+        pat2 = np.array(pat2)        
 
     p1l = len(pat1)
     p2l = len(pat2)
@@ -248,7 +324,9 @@ def dtw_dtai(pat1, pat2, r):
     l_longest = np.max([p1l, p2l])
     l_shortest = np.min([p1l, p2l])
 
-    path = dtw.warping_path(pat1, pat2, window=round(l_longest*r), psi=round(l_longest*r))
+    radius = round(l_longest*r)
+    
+    path = dtw_ndim.warping_path(pat1, pat2, window=radius, psi=radius)
     path = np.array(path)
     
     distances = np.abs(pat1[path[:, 0]] - pat2[path[:, 1]]) ** 2

@@ -10,10 +10,12 @@ import numpy as np
 import tqdm
 import dtaidistance.dtw
 import soundfile as sf
-from experiments.alapana_dataset_analysis.dtw import dtw_path, dtw_dtai
+from experiments.alapana_dataset_analysis.dtw import dtw_path
 from scipy.ndimage import gaussian_filter1d
 
 import librosa
+
+r = 0.1
 
 run_name = 'result_0.1'
 
@@ -55,7 +57,6 @@ for t in all_groups['track'].unique():
     pitch_tracks[t] = (gaussian_filter1d(pitch, 2.5), time, timestep)
 
 
-
 def get_loudness(y, window_size=2048):
     S = librosa.stft(y, n_fft=window_size)**2
     power = np.abs(S)**2
@@ -63,6 +64,35 @@ def get_loudness(y, window_size=2048):
     p_ref = np.max(power)
     loudness = librosa.power_to_db(p_mean, ref=p_ref)
     return loudness[0]
+
+
+def get_spectral_flux(S, sr=44100, fps=100, lag=2, max_size=3, n_fft=2048, fmin=27.5, fmax=17000):
+    
+    hop_length = int(librosa.time_to_samples(1./fps, sr=sr))
+
+    S = librosa.feature.melspectrogram(y, sr=sr, n_fft=n_fft,
+                                   hop_length=hop_length,
+                                   fmin=fmin,
+                                   fmax=fmax,
+                                   n_mels=n_mels)
+
+    spectral_flux = librosa.onset.onset_strength(
+                                          S=librosa.power_to_db(S, ref=np.max),
+                                          sr=sr,
+                                          hop_length=hop_length,
+                                          lag=lag, max_size=max_size)
+
+
+    bl_spectral_flux = librosa.onset.onset_strength(
+                                          S=librosa.power_to_db(S_bl, ref=np.max),
+                                          sr=sr,
+                                          hop_length=hop_length,
+                                          lag=lag, max_size=max_size)
+
+
+    frame_time = librosa.frames_to_time(np.arange(len(spectral_flux)), sr=sr, hop_length=hop_length)
+
+    return spectral_flux, bl_spectral_flux, frame_time
 
 
 # distance from tonic tracks
@@ -82,7 +112,10 @@ for t in all_groups['track'].unique():
     loudness_smooth -= loudness_smooth.min()
     loudness_tracks[t] = (loudness_smooth, step)
 
-    # Change in loudness
+    # Spectral Flux
+    spectral_flux, bl_spectral_flux, sf_time = get_spectral_flux(y)
+    step = len(y)/len(spectral_flux)
+    sflux_tracks[t] = (spectral_flux, bl_spectral_flux, sf_time, step)
 
     # Distance from tonic
     sameoctave = pitch%1200
@@ -155,7 +188,6 @@ with open(audio_distances_path,'a') as file:
                 rtrack = rrow.track
                 rindex = rrow['index']
                 if qindex <= rindex:
-                    
                     continue
                 (rloudness, rloudnessstep) = loudness_tracks[rtrack]
                 (rdtonic, rtime, rtimestep) = dtonic_tracks[rtrack]
@@ -176,10 +208,8 @@ with open(audio_distances_path,'a') as file:
                 p2l = len(pat2_loudness)
 
                 l_longest = max([p1l, p2l])
-                l_shortest = min([p1l, p2l])
-                #if l_longest/l_shortest-1 > 0.5:
-                #    continue
-                path, dtw_val = path, dtw_val = dtw_dtai(pat1_loudness, pat2_loudness, r=0.1)
+                
+                path, dtw_val = dtw_path(pat1_loudness, pat2_loudness, radius=r)
                 l = len(path)
                 loudness_dtw = dtw_val/l
                 
@@ -188,7 +218,7 @@ with open(audio_distances_path,'a') as file:
                 p2l = len(pat2_dtonic)
 
                 l_longest = max([p1l, p2l])
-                path, dtw_val = path, dtw_val = dtw_dtai(pat1_dtonic, pat2_dtonic, r=0.1)
+                path, dtw_val = dtw_path(pat1_dtonic, pat2_dtonic, radius=r)
                 l = len(path)
                 dtonic_dtw = dtw_val/l
 

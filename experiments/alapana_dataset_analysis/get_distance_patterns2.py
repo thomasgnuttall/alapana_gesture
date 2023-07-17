@@ -2,13 +2,14 @@ import pandas as pd
 from exploration.pitch import get_timeseries, pitch_seq_to_cents,interpolate_below_length
 from exploration.io import create_if_not_exists
 import pandas as pd
+import matplotlib.pyplot as plt
 import numpy
 import librosa
 import os
 import fastdtw
 import numpy as np
 import tqdm
-
+from scipy.signal import savgol_filter
 from experiments.alapana_dataset_analysis.dtw import dtw_path, dtw_dtai
 from scipy.ndimage import gaussian_filter1d
 
@@ -37,7 +38,6 @@ track_names = [
     "2018_11_15_Sec_12_P1_Kalyani_slates",
     "2018_11_15_Sec_13_P1_Bhairavi_slates",
     "2018_11_15_Sec_1_P1_Anandabhairavi_A_slates",
-    "2018_11_15_Sec_2_P1_Anandabhairavi_B_slates",
     "2018_11_15_Sec_3_P1_Anandabhairavi_C_slates",
     "2018_11_15_Sec_4_P1_Shankara_slates",
     "2018_11_15_Sec_6_P1_Varaali_slates",
@@ -81,8 +81,8 @@ def get_raga(t, metadata):
 
 def get_derivative(pitch, time):
 
-    d_pitch = np.diff(pitch) / np.diff(time)
-    d_time = (np.array(time)[:-1] + np.array(time)[1:]) / 2
+    d_pitch = [((pitch[i+1]-pitch[i])+((pitch[i+2]-pitch[i+1])/2))/2 for i in range(len(pitch)-2)]
+    d_time = time[1:-1]
 
     return d_pitch, d_time
 
@@ -96,13 +96,12 @@ for t in track_names:
         pitch[pitch==None]=0
         pitch = interpolate_below_length(pitch, 0, (350*0.001/timestep))
         pitch_d, time_d = get_derivative(pitch, time)
-        pitch_tracks[t] = (gaussian_filter1d(pitch, 2.5), time, timestep, gaussian_filter1d(pitch_d, 2.5), time_d)
+        pitch_tracks[t] = (pitch, time, timestep, pitch_d, time_d)
+        #pitch_tracks[t] = (gaussian_filter1d(pitch, 2.5), time, timestep, gaussian_filter1d(pitch_d, 2.5), time_d)
 
 all_patts = pd.read_csv(os.path.join(out_dir, 'all_groups.csv'))
-
+all_patts = all_patts[all_patts['track'].isin(track_names)]
 #all_distances = pd.DataFrame(columns=['index1', 'index2', 'path1_start', 'path1_end', 'path2_start', 'path2_end', 'path_length', 'dtw_distance', 'dtw_distance_norm'])
-
-
 
 distances_path = os.path.join(out_dir, f'distances.csv')
 
@@ -113,8 +112,22 @@ except OSError:
     pass
 create_if_not_exists(distances_path)
 
-r=0.2
- 
+
+
+def trim_zeros(pitch, time):
+    m = pitch!=0
+    i1,i2 = m.argmax(), m.size - m[::-1].argmax()
+    return pitch[i1:i2], time[i1:i2]
+
+
+def smooth(pitch, time):
+    pitch2, time2 = trim_zeros(pitch, time)
+    interp = savgol_filter(pitch2, polyorder=2, window_length=13, mode='interp')
+    return interp, time2
+
+
+r=0.1
+
 ##text=List of strings to be written to file
 header = 'index1,index2,pitch_dtw,diff_pitch_dtw'
 with open(distances_path,'a') as file:
@@ -144,23 +157,35 @@ with open(distances_path,'a') as file:
             sr2 = int(rend/rtimestep)
 
             pat1 = qpitch[sq1:sq2]
+            pat1_time = qtime[sq1:sq2]
             pat2 = rpitch[sr1:sr2]
+            pat2_time = rtime[sr1:sr2]
             
             pat1[pat1 == None] = 0
             pat2[pat2 == None] = 0
  
-            pat1 = np.trim_zeros(pat1)
-            pat2 = np.trim_zeros(pat2)
+            pat1, pat1_time = smooth(pat1, pat1_time)
+            pat2, pat2_time = smooth(pat2, pat2_time)
+            
+            pi = len(pat1)
+            pj = len(pat2)
+            l_longest = max([pi, pj])
 
-            diff1 = qpitch_d[sq1:sq2]
-            diff2 = rpitch_d[sr1:sr2]
+            #diff1 = qpitch_d[sq1:sq2]
+            #diff2 = rpitch_d[sr1:sr2]
 
-            path, dtw_val = dtw_dtai(pat1, pat2, r=0.1)
+            #diff1 = smooth(diff1)
+            #diff2 = smooth(diff2)
+            
+            diff1,_ = get_derivative(pat1, pat1_time)
+            diff2,_ = get_derivative(pat2, pat2_time)
+
+            path, dtw_val = dtw_path(pat1, pat2, radius=int(l_longest*r))
 
             l = len(path)
             dtw_norm = dtw_val/l
 
-            path, dtw_val = dtw_dtai(diff1, diff2, r=0.1)
+            path, dtw_val = dtw_path(diff1, diff2, radius=int(l_longest*r))
             l = len(path)
             dtw_norm_diff = dtw_val/l
 
@@ -178,5 +203,11 @@ with open(distances_path,'a') as file:
             #}, ignore_index=True)
             file.write(line)
             file.write('\n')
+
+            #plt.plot(pat1, range(len(pat1)))
+            #plot_path = f'plots/testing_smoothing/{qi}.png'
+            #create_if_not_exists(plot_path)
+            #plt.savefig(plot_path)
+            #plt.close('all')
 
     #all_distances.reset_index(inplace=True, drop=True)
