@@ -32,13 +32,16 @@ index_features = load_pkl(index_features_path)
 
 pitch_targets = ['pitch_dtw', 'diff_pitch_dtw']
 
-audio_targets = ['loudness_dtw']
+audio_targets = ['loudness_dtw', 'spectral_flux']
 
 features = [
        '1dpositionDTWHand',
        '3dpositionDTWHand', '1dvelocityDTWHand',
        '3dvelocityDTWHand', '1daccelerationDTWHand',
-       '3daccelerationDTWHand']
+       '3daccelerationDTWHand','1dpositionDTWHead',
+       '3dpositionDTWHead', '1dvelocityDTWHead',
+       '3dvelocityDTWHead', '1daccelerationDTWHead',
+       '3daccelerationDTWHead']
 
 audio_distance = distances.merge(audio_features, on=['index1', 'index2'])
 

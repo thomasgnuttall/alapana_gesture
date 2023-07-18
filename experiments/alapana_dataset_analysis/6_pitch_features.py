@@ -65,34 +65,61 @@ def get_loudness(y, window_size=2048):
     loudness = librosa.power_to_db(p_mean, ref=p_ref)
     return loudness[0]
 
+@jit(nopython=True)
+def compute_local_average(x, M):
+    """Compute local average of signal
 
-def get_spectral_flux(S, sr=44100, fps=100, lag=2, max_size=3, n_fft=2048, fmin=27.5, fmax=17000):
+    Notebook: C6/C6S1_NoveltySpectral.ipynb
+
+    Args:
+        x (np.ndarray): Signal
+        M (int): Determines size (2M+1) in samples of centric window  used for local average
+
+    Returns:
+        local_average (np.ndarray): Local average signal
+    """
+    L = len(x)
+    local_average = np.zeros(L)
+    for m in range(L):
+        a = max(m - M, 0)
+        b = min(m + M + 1, L)
+        local_average[m] = (1 / (2 * M + 1)) * np.sum(x[a:b])
+    return local_average
     
-    hop_length = int(librosa.time_to_samples(1./fps, sr=sr))
+def compute_novelty_spectrum(x, Fs=44100, N=1024, H=256, gamma=100.0, M=10, norm=True):
+    """Compute spectral-based novelty function
 
-    S = librosa.feature.melspectrogram(y, sr=sr, n_fft=n_fft,
-                                   hop_length=hop_length,
-                                   fmin=fmin,
-                                   fmax=fmax,
-                                   n_mels=n_mels)
+    Notebook: C6/C6S1_NoveltySpectral.ipynb
 
-    spectral_flux = librosa.onset.onset_strength(
-                                          S=librosa.power_to_db(S, ref=np.max),
-                                          sr=sr,
-                                          hop_length=hop_length,
-                                          lag=lag, max_size=max_size)
+    Args:
+        x (np.ndarray): Signal
+        Fs (scalar): Sampling rate (Default value = 1)
+        N (int): Window size (Default value = 1024)
+        H (int): Hop size (Default value = 256)
+        gamma (float): Parameter for logarithmic compression (Default value = 100.0)
+        M (int): Size (frames) of local average (Default value = 10)
+        norm (bool): Apply max norm (if norm==True) (Default value = True)
 
-
-    bl_spectral_flux = librosa.onset.onset_strength(
-                                          S=librosa.power_to_db(S_bl, ref=np.max),
-                                          sr=sr,
-                                          hop_length=hop_length,
-                                          lag=lag, max_size=max_size)
-
-
-    frame_time = librosa.frames_to_time(np.arange(len(spectral_flux)), sr=sr, hop_length=hop_length)
-
-    return spectral_flux, bl_spectral_flux, frame_time
+    Returns:
+        novelty_spectrum (np.ndarray): Energy-based novelty function
+        Fs_feature (scalar): Feature rate
+    """
+    X = librosa.stft(x, n_fft=N, hop_length=H, win_length=N, window='hanning')
+    Fs_feature = Fs / H
+    Y = np.log(1 + gamma * np.abs(X))
+    Y_diff = np.diff(Y)
+    Y_diff[Y_diff < 0] = 0
+    novelty_spectrum = np.sum(Y_diff, axis=0)
+    novelty_spectrum = np.concatenate((novelty_spectrum, np.array([0.0])))
+    if M > 0:
+        local_average = compute_local_average(novelty_spectrum, M)
+        novelty_spectrum = novelty_spectrum - local_average
+        novelty_spectrum[novelty_spectrum < 0] = 0.0
+    if norm:
+        max_value = max(novelty_spectrum)
+        if max_value > 0:
+            novelty_spectrum = novelty_spectrum / max_value
+    return novelty_spectrum, Fs_feature
 
 
 # distance from tonic tracks
@@ -113,9 +140,9 @@ for t in all_groups['track'].unique():
     loudness_tracks[t] = (loudness_smooth, step)
 
     # Spectral Flux
-    spectral_flux, bl_spectral_flux, sf_time = get_spectral_flux(y)
+    spectral_flux, fs_feature = compute_novelty_spectrum(y)
     step = len(y)/len(spectral_flux)
-    sflux_tracks[t] = (spectral_flux, bl_spectral_flux, sf_time, step)
+    sflux_tracks[t] = (spectral_flux, fs_feature)
 
     # Distance from tonic
     sameoctave = pitch%1200
@@ -163,7 +190,7 @@ except OSError:
 create_if_not_exists(audio_distances_path)
 
 ##text=List of strings to be written to file
-header = 'index1,index2,loudness_dtw,distance_from_tonic_dtw'
+header = 'index1,index2,loudness_dtw,distance_from_tonic_dtw,spectral_flux'
 with open(audio_distances_path,'a') as file:
     file.write(header)
     file.write('\n')
@@ -177,11 +204,14 @@ with open(audio_distances_path,'a') as file:
 
         (qloudness, qloudnessstep) = loudness_tracks[qtrack]
         (qdtonic, qtime, qtimestep) = dtonic_tracks[qtrack]
+        (qsf, _) = sflux_tracks[qtrack]
 
         loudness_sq1 = int(qstart*sr/qloudnessstep)
         loudness_sq2 = int(qend*sr/qloudnessstep)
         dtonic_sq1 = int(qstart/qtimestep)
         dtonic_sq2 = int(qend/qtimestep)
+        sf_sq1 = int(qstart/qtimestep)
+        sf_sq2 = int(qend/qtimestep)
         for j, rrow in all_groups.iterrows():
                 rstart = rrow.start
                 rend = rrow.end
@@ -191,17 +221,23 @@ with open(audio_distances_path,'a') as file:
                     continue
                 (rloudness, rloudnessstep) = loudness_tracks[rtrack]
                 (rdtonic, rtime, rtimestep) = dtonic_tracks[rtrack]
+                (rsf, _) = sflux_tracks[rtrack]
 
                 loudness_sr1 = int(rstart*sr/rloudnessstep)
                 loudness_sr2 = int(rend*sr/rloudnessstep)
                 dtonic_sr1 = int(rstart/rtimestep)
                 dtonic_sr2 = int(rend/rtimestep)
+                sf_sr1 = int(rstart/rtimestep)
+                sf_sr2 = int(rend/rtimestep)
 
                 pat1_loudness = qloudness[loudness_sq1:loudness_sq2]
                 pat2_loudness = rloudness[loudness_sr1:loudness_sr2]
                 
                 pat1_dtonic = qdtonic[dtonic_sq1:dtonic_sq2]
                 pat2_dtonic = rdtonic[dtonic_sr1:dtonic_sr2]
+
+                pat1_sf = qsf[sf_sq1:sf_sq2]
+                pat2_sf = rsf[sf_sr1:sf_sr2]
 
                 # DTW normal loudness
                 p1l = len(pat1_loudness)
@@ -222,8 +258,17 @@ with open(audio_distances_path,'a') as file:
                 l = len(path)
                 dtonic_dtw = dtw_val/l
 
+                # DTW Spectral Flux
+                p1l = len(pat1_sf)
+                p2l = len(pat2_sf)
+
+                l_longest = max([p1l, p2l])
+                path, dtw_val = dtw_path(pat1_sf, pat2_sf, radius=r)
+                l = len(path)
+                dsf_dtw = dtw_val/l
+
                 # Write
-                line =f"{qindex},{rindex},{loudness_dtw},{dtonic_dtw}"
+                line =f"{qindex},{rindex},{loudness_dtw},{dtonic_dtw},{dsf_dtw}"
 
                 file.write(line)
                 file.write('\n')
