@@ -3,6 +3,10 @@ import numpy as np
 from numba import njit, prange
 from dtaidistance import dtw, dtw_ndim
 
+from exploration.io import create_if_not_exists
+from matplotlib.ticker import NullFormatter, FormatStrFormatter
+import matplotlib.pyplot as plt
+
 def line(x0, y0, x1, y1):
         "Bresenham's line algorithm"
         points_in_line = []
@@ -334,3 +338,59 @@ def dtw_dtai(pat1, pat2, r):
 
     return path, dtw_val
 
+
+def plot_dtw(pat1, pat2, path_dtw, dtw_norm, r, write):
+    plt.close()
+
+    create_if_not_exists(write)
+    nullfmt = NullFormatter()
+
+    # definitions for the axes
+    left, width = 0.12, 0.60
+    bottom, height = 0.08, 0.60
+    bottom_h =  0.16 + width 
+    left_h = left + 0.27 
+    rect_plot = [left_h, bottom, width, height]
+    rect_x = [left_h, bottom_h, width, 0.2]
+    rect_y = [left, bottom, 0.2, height]
+
+    # start with a rectangular Figure
+    plt.figure(2, figsize=(8, 8))
+
+    axplot = plt.axes(rect_plot)
+    axx = plt.axes(rect_x)
+    axx.grid()
+    axy = plt.axes(rect_y)
+    axy.grid()
+    # Plot the matrix
+    #axplot.pcolor(acc.T,cmap=cm.gray)
+    axplot.plot([x[0] for x in path_dtw], [x[1] for x in path_dtw], 'black')
+
+    axplot.set_xlim((0, len(pat1)))
+    axplot.set_ylim((0, len(pat2)))
+    axplot.tick_params(axis='both', which='major', labelsize=18)
+
+    # Plot time serie horizontal
+    axx.plot(pat1, color='k')
+    axx.tick_params(axis='both', which='major', labelsize=18)
+    xloc = plt.MaxNLocator(4)
+    x2Formatter = FormatStrFormatter('%d')
+    axx.yaxis.set_major_locator(xloc)
+    axx.yaxis.set_major_formatter(x2Formatter)
+
+    # Plot time serie vertical
+    axy.plot(pat2, range(len(pat2)),color='k')
+    axy.invert_xaxis()
+    yloc = plt.MaxNLocator(4)
+    xFormatter = FormatStrFormatter('%d')
+    axy.xaxis.set_major_locator(yloc)
+    axy.xaxis.set_major_formatter(xFormatter)
+    axy.tick_params(axis='both', which='major', labelsize=18)
+
+    # Limits
+    axx.set_xlim(axplot.get_xlim())
+    axy.set_ylim(axplot.get_ylim())
+
+    plt.title(f'r={r}, dtw={round(dtw_norm,2)}')
+    plt.savefig(write)
+    plt.close()

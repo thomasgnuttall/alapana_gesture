@@ -42,7 +42,7 @@ def plot_dtw(pat1, pat2, path_dtw, dtw_norm, r, write):
 	axplot.tick_params(axis='both', which='major', labelsize=18)
 
 	# Plot time serie horizontal
-	axx.plot(pat1,'.', color='k')
+	axx.plot(pat1, color='k')
 	axx.tick_params(axis='both', which='major', labelsize=18)
 	xloc = plt.MaxNLocator(4)
 	x2Formatter = FormatStrFormatter('%d')
@@ -50,7 +50,7 @@ def plot_dtw(pat1, pat2, path_dtw, dtw_norm, r, write):
 	axx.yaxis.set_major_formatter(x2Formatter)
 
 	# Plot time serie vertical
-	axy.plot(pat2, range(len(pat2)),'.',color='k')
+	axy.plot(pat2, range(len(pat2)),color='k')
 	axy.invert_xaxis()
 	yloc = plt.MaxNLocator(4)
 	xFormatter = FormatStrFormatter('%d')

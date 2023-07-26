@@ -81,7 +81,7 @@ def get_raga(t, metadata):
 
 def get_derivative(pitch, time):
 
-    d_pitch = [((pitch[i+1]-pitch[i])+((pitch[i+2]-pitch[i+1])/2))/2 for i in range(len(pitch)-2)]
+    d_pitch = np.array([((pitch[i+1]-pitch[i])+((pitch[i+2]-pitch[i+1])/2))/2 for i in range(len(pitch)-2)])
     d_time = time[1:-1]
 
     return d_pitch, d_time
@@ -113,16 +113,17 @@ except OSError:
 create_if_not_exists(distances_path)
 
 
-
 def trim_zeros(pitch, time):
     m = pitch!=0
     i1,i2 = m.argmax(), m.size - m[::-1].argmax()
     return pitch[i1:i2], time[i1:i2]
 
 
-def smooth(pitch, time):
+def smooth(pitch, time, timestep, wms=125):
     pitch2, time2 = trim_zeros(pitch, time)
-    interp = savgol_filter(pitch2, polyorder=2, window_length=13, mode='interp')
+    wl = round(wms*0.001/timestep)
+    wl = wl if not wl%2 == 0 else wl+1
+    interp = savgol_filter(pitch2, polyorder=2, window_length=wl, mode='interp')
     return interp, time2
 
 
@@ -164,21 +165,18 @@ with open(distances_path,'a') as file:
             pat1[pat1 == None] = 0
             pat2[pat2 == None] = 0
  
-            pat1, pat1_time = smooth(pat1, pat1_time)
-            pat2, pat2_time = smooth(pat2, pat2_time)
+            pat1, pat1_time = smooth(pat1, pat1_time, rtimestep)
+            pat2, pat2_time = smooth(pat2, pat2_time, qtimestep)
             
             pi = len(pat1)
             pj = len(pat2)
             l_longest = max([pi, pj])
-
-            #diff1 = qpitch_d[sq1:sq2]
-            #diff2 = rpitch_d[sr1:sr2]
-
-            #diff1 = smooth(diff1)
-            #diff2 = smooth(diff2)
             
             diff1,_ = get_derivative(pat1, pat1_time)
             diff2,_ = get_derivative(pat2, pat2_time)
+
+            diff1, diff1_time = smooth(diff1, pat1_time, rtimestep)
+            diff2, diff2_time = smooth(diff2, pat2_time, qtimestep)
 
             path, dtw_val = dtw_path(pat1, pat2, radius=int(l_longest*r))
 

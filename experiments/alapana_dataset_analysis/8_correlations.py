@@ -32,7 +32,7 @@ index_features = load_pkl(index_features_path)
 
 pitch_targets = ['pitch_dtw', 'diff_pitch_dtw']
 
-audio_targets = ['loudness_dtw', 'spectral_flux']
+audio_targets = ['loudness_dtw', 'spectral_centroid']
 
 features = [
        '1dpositionDTWHand',

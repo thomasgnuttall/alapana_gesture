@@ -2,6 +2,7 @@ import pandas as pd
 from exploration.pitch import get_timeseries, pitch_seq_to_cents,interpolate_below_length
 from exploration.io import create_if_not_exists
 import pandas as pd
+from numba import jit
 import numpy
 import librosa
 import os
@@ -16,7 +17,7 @@ from scipy.ndimage import gaussian_filter1d
 import librosa
 
 r = 0.1
-
+sr=44100
 run_name = 'result_0.1'
 
 ### SPECTRAL FLUX - MFCC
@@ -43,8 +44,8 @@ def get_tonic(t, metadata):
 # get audios and pitches
 audio_tracks = {}
 pitch_tracks = {}
-for t in all_groups['track'].unique():
-    a_path = f'/Volumes/MyPassport/cae-invar/audio/lara_wim2/spleeter/{t}.mp3'
+for t in tqdm.tqdm(all_groups['track'].unique()):
+    a_path = f'/Volumes/MyPassport/cae-invar/audio/lara_wim2/original/{t}.wav'
     audio_tracks[t], _ = librosa.load(a_path, sr=44100)
     
     p_path = f'/Volumes/MyPassport/cae-invar/data/pitch_tracks/alapana/{t}.csv'
@@ -54,7 +55,7 @@ for t in all_groups['track'].unique():
     pitch[pitch==None]=0
     pitch = interpolate_below_length(pitch, 0, (350*0.001/timestep))
     pitch = pitch.astype(float)
-    pitch_tracks[t] = (gaussian_filter1d(pitch, 2.5), time, timestep)
+    pitch_tracks[t] = (pitch, time, timestep)
 
 
 def get_loudness(y, window_size=2048):
@@ -85,8 +86,9 @@ def compute_local_average(x, M):
         b = min(m + M + 1, L)
         local_average[m] = (1 / (2 * M + 1)) * np.sum(x[a:b])
     return local_average
-    
-def compute_novelty_spectrum(x, Fs=44100, N=1024, H=256, gamma=100.0, M=10, norm=True):
+
+
+def compute_novelty_spectrum(x, Fs=44100, N=1024, H=512, gamma=200.0, M=10, norm=True):
     """Compute spectral-based novelty function
 
     Notebook: C6/C6S1_NoveltySpectral.ipynb
@@ -105,7 +107,7 @@ def compute_novelty_spectrum(x, Fs=44100, N=1024, H=256, gamma=100.0, M=10, norm
         Fs_feature (scalar): Feature rate
     """
     X = librosa.stft(x, n_fft=N, hop_length=H, win_length=N, window='hanning')
-    Fs_feature = Fs / H
+    Fs_feature = H / Fs
     Y = np.log(1 + gamma * np.abs(X))
     Y_diff = np.diff(Y)
     Y_diff[Y_diff < 0] = 0
@@ -125,7 +127,7 @@ def compute_novelty_spectrum(x, Fs=44100, N=1024, H=256, gamma=100.0, M=10, norm
 # distance from tonic tracks
 dtonic_tracks = {}
 # spectral flux tracks
-sflux_tracks = {}
+sc_tracks = {}
 # loudness tracks
 loudness_tracks = {}
 for t in all_groups['track'].unique():
@@ -134,15 +136,26 @@ for t in all_groups['track'].unique():
 
     # loudness
     loudness = get_loudness(y)
-    step = len(y)/len(loudness)
-    loudness_smooth = gaussian_filter1d(loudness, 10)
-    loudness_smooth -= loudness_smooth.min()
+    step = (len(y)/sr)/len(loudness)
+    wms = 125
+    wl = round(wms*0.001/step)
+    wl = wl if not wl%2 == 0 else wl+1
+    loudness_smooth = savgol_filter(loudness, polyorder=2, window_length=wl, mode='interp')
     loudness_tracks[t] = (loudness_smooth, step)
 
-    # Spectral Flux
-    spectral_flux, fs_feature = compute_novelty_spectrum(y)
-    step = len(y)/len(spectral_flux)
-    sflux_tracks[t] = (spectral_flux, fs_feature)
+    # Spectral centroid
+    centroid = spectral_centroid(
+        y=y, sr=sr, n_fft=2048, hop_length=512, window='hanning', center=True, pad_mode='constant')[0]
+
+    sc_timestep = (len(y)/sr)/len(centroid)
+
+    wms = 125
+    wl = round(wms*0.001/sc_timestep)
+    wl = wl if not wl%2 == 0 else wl+1
+    centroid125 = savgol_filter(centroid, polyorder=2, window_length=wl, mode='interp')
+
+    #spectral_flux, fs_feature = compute_novelty_spectrum(y)
+    sc_tracks[t] = (centroid125, sc_timestep)
 
     # Distance from tonic
     sameoctave = pitch%1200
@@ -178,7 +191,7 @@ for t in all_groups['track'].unique():
 
 
 
-sr=44100
+
 
 audio_distances_path = os.path.join(out_dir, 'audio_distances.csv')
 
@@ -190,7 +203,7 @@ except OSError:
 create_if_not_exists(audio_distances_path)
 
 ##text=List of strings to be written to file
-header = 'index1,index2,loudness_dtw,distance_from_tonic_dtw,spectral_flux'
+header = 'index1,index2,loudness_dtw,distance_from_tonic_dtw,spectral_centroid'
 with open(audio_distances_path,'a') as file:
     file.write(header)
     file.write('\n')
@@ -204,14 +217,15 @@ with open(audio_distances_path,'a') as file:
 
         (qloudness, qloudnessstep) = loudness_tracks[qtrack]
         (qdtonic, qtime, qtimestep) = dtonic_tracks[qtrack]
-        (qsf, _) = sflux_tracks[qtrack]
+        (qsf, qsftimestep) = sc_tracks[qtrack]
 
-        loudness_sq1 = int(qstart*sr/qloudnessstep)
-        loudness_sq2 = int(qend*sr/qloudnessstep)
-        dtonic_sq1 = int(qstart/qtimestep)
-        dtonic_sq2 = int(qend/qtimestep)
-        sf_sq1 = int(qstart/qtimestep)
-        sf_sq2 = int(qend/qtimestep)
+        loudness_sq1 = round(qstart/qloudnessstep)
+        loudness_sq2 = round(qend/qloudnessstep)
+        dtonic_sq1 = round(qstart/qtimestep)
+        dtonic_sq2 = round(qend/qtimestep)
+        sf_sq1 = round(qstart/qsftimestep)
+        sf_sq2 = round(qend/qsftimestep)
+
         for j, rrow in all_groups.iterrows():
                 rstart = rrow.start
                 rend = rrow.end
@@ -221,14 +235,14 @@ with open(audio_distances_path,'a') as file:
                     continue
                 (rloudness, rloudnessstep) = loudness_tracks[rtrack]
                 (rdtonic, rtime, rtimestep) = dtonic_tracks[rtrack]
-                (rsf, _) = sflux_tracks[rtrack]
+                (rsf, rsftimestep) = sc_tracks[rtrack]
 
-                loudness_sr1 = int(rstart*sr/rloudnessstep)
-                loudness_sr2 = int(rend*sr/rloudnessstep)
-                dtonic_sr1 = int(rstart/rtimestep)
-                dtonic_sr2 = int(rend/rtimestep)
-                sf_sr1 = int(rstart/rtimestep)
-                sf_sr2 = int(rend/rtimestep)
+                loudness_sr1 = round(rstart/rloudnessstep)
+                loudness_sr2 = round(rend/rloudnessstep)
+                dtonic_sr1 = round(rstart/rtimestep)
+                dtonic_sr2 = round(rend/rtimestep)
+                sf_sr1 = round(rstart/rsftimestep)
+                sf_sr2 = round(rend/rsftimestep)
 
                 pat1_loudness = qloudness[loudness_sq1:loudness_sq2]
                 pat2_loudness = rloudness[loudness_sr1:loudness_sr2]

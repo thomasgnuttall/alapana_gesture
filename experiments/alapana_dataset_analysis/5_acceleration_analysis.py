@@ -333,19 +333,24 @@ for i, row in tqdm.tqdm(list(all_groups.iterrows())):
             this_frame['x'] = -this_frame['x']
 
         vectors = this_frame.values
+        
+        timestep = df['time_ms'].iloc[5]-df['time_ms'].iloc[4]
+        wl = round(125/timestep)
+        wl = wl if not wl%2 ==0 else wl+1
+
         if num_dims==1:
             vectors = np.apply_along_axis(np.linalg.norm, 1, vectors)
             po = 2
-            vectors = savgol_filter(vectors, polyorder=2, window_length=5, mode='interp')
+            vectors = savgol_filter(vectors, polyorder=2, window_length=wl, mode='interp')
         elif num_dims==2:
             vectors = vectors[:,:2]
-            vectors[:,0] = savgol_filter(vectors[:,0], polyorder=2, window_length=5, mode='interp')
-            vectors[:,1] = savgol_filter(vectors[:,1], polyorder=2, window_length=5, mode='interp')
+            vectors[:,0] = savgol_filter(vectors[:,0], polyorder=2, window_length=wl, mode='interp')
+            vectors[:,1] = savgol_filter(vectors[:,1], polyorder=2, window_length=wl, mode='interp')
         elif num_dims==3:
             vectors = vectors
-            vectors[:,0] = savgol_filter(vectors[:,0], polyorder=2, window_length=5, mode='interp')
-            vectors[:,1] = savgol_filter(vectors[:,1], polyorder=2, window_length=5, mode='interp')
-            vectors[:,2] = savgol_filter(vectors[:,2], polyorder=2, window_length=5, mode='interp')
+            vectors[:,0] = savgol_filter(vectors[:,0], polyorder=2, window_length=wl, mode='interp')
+            vectors[:,1] = savgol_filter(vectors[:,1], polyorder=2, window_length=wl, mode='interp')
+            vectors[:,2] = savgol_filter(vectors[:,2], polyorder=2, window_length=wl, mode='interp')
 
 
         index_features[index][feature] = vectors

@@ -6,62 +6,63 @@ import random
 
 feature='Pitch (cents)'
 
-
+po = 2
+wl = 0.125 #in seconds
+wl_ = int(wl/timestep)
+wl_ = wl_ if wl%2 ==0 else wl_+1
 
 def trim_zeros(pitch, time):
 	m = pitch!=0
 	i1,i2 = m.argmax(), m.size - m[::-1].argmax()
 	return pitch[i1:i2], time[i1:i2]
 
-i = 325
+i = 736
 
 motif = all_groups[all_groups['index']==i].iloc[0]
 t = motif.track
-pitch, time, timestep,pitch_d, time_d = pitch_tracks[t]
+pitch, time, timestep, pitch_d, time_d = pitch_tracks[t]
 
-timestep = 0.010000908308633712 # for pitch
-i_vec = pitch[round(motif['start']/timestep):round(motif['end']/timestep)]
-i_time = time[round(motif['start']/timestep):round(motif['end']/timestep)]
-i_vec,i_time = trim_zeros(i_vec, i_time)
+timestep = 0.010000908308633712 # for Pitch
+i_vec = np.array(pitch[round(motif['start']/timestep):round(motif['end']/timestep)])
+i_time = np.array(time[round(motif['start']/timestep):round(motif['end']/timestep)])
 
-# Gaussiaan Smooth
-sigma = 2.5
-gauss = gaussian_filter1d(i_vec, sigma)
+pat1, pat1_time = smooth(i_vec, i_time)
 
-# Butterworth Filter
-freq = 30
-sos = butter(2, freq, output='sos', fs=1/timestep)
-bw = sosfilt(sos, i_vec)
+diff1, diff1_time = get_derivative(pat1, pat1_time)
+
+p75, t75 = smooth(diff1, diff1_time, 75)
+p100, t100 = smooth(diff1, diff1_time, 100)
+p125, t125 = smooth(diff1, diff1_time, 125)
 
 # Interp
-po = 2
-wl = 0.125 #in seconds
-wl_ = int(wl/timestep)
-wl_ = wl_ if wl%2 ==0 else wl_+1
 interp = savgol_filter(i_vec, polyorder=po, window_length=wl_, mode='interp')
 
-fig, axs = plt.subplots(4, figsize=(8, 14))
+
+
+
+# Plot
+fig, axs = plt.subplots(1, figsize=(14, 4))
 plt.subplots_adjust(hspace=0.3)
 
-axs[0].plot(i_time, i_vec)
-axs[1].plot(i_time, gauss)
-axs[2].plot(i_time, bw)
-axs[3].plot(i_time, interp)
+axs.plot(pat1_time, pat1)
+#axs[1].plot(t75, p75)
+#axs[2].plot(t100, p100)
+#axs[3].plot(t125, p125)
 
-axs[0].set_title(f'Original (index={i})', fontsize=10)
-axs[1].set_title(f'Gaussian. sigma={sigma}', fontsize=10)
-axs[2].set_title(f'Butterworth. Freq={freq}Hz', fontsize=10)
-axs[3].set_title(f'Savitzky-Golay. Polyorder={po}. Window length={wl}s', fontsize=10)
+axs.set_title(f'Original (index={i})', fontsize=10)
+#axs[1].set_title(f'75ms', fontsize=10)
+#axs[2].set_title(f'100ms', fontsize=10)
+#axs[3].set_title(f'125ms', fontsize=10)
 
-axs[0].grid()
-axs[1].grid()
-axs[2].grid()
-axs[3].grid()
+axs.grid()
+#axs[1].grid()
+#axs[2].grid()
+#axs[3].grid()
 
 plt.xlabel('Time (s)')
-axs[0].set_ylabel(f'{feature}')
-axs[1].set_ylabel(f'{feature}')
-axs[2].set_ylabel(f'{feature}')
-axs[3].set_ylabel(f'{feature}')
+axs.set_ylabel(f'{feature}')
+#axs[1].set_ylabel(f'{feature}')
+#axs[2].set_ylabel(f'{feature}')
+#axs[3].set_ylabel(f'{feature}')
 
 plt.savefig('smooth_test.png')
