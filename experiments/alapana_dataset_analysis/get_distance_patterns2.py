@@ -130,7 +130,7 @@ def smooth(pitch, time, timestep, wms=125):
 r=0.1
 
 ##text=List of strings to be written to file
-header = 'index1,index2,pitch_dtw,diff_pitch_dtw'
+header = 'index1,index2,pitch_dtw,pitch_dtw_mean,diff_pitch_dtw'
 with open(distances_path,'a') as file:
     file.write(header)
     file.write('\n')
@@ -182,12 +182,17 @@ with open(distances_path,'a') as file:
 
             l = len(path)
             dtw_norm = dtw_val/l
+            
+            path, dtw_val = dtw_path(pat1, pat2, radius=int(l_longest*r), norm=True)
+
+            l = len(path)
+            dtw_norm_mean = dtw_val/l
 
             path, dtw_val = dtw_path(diff1, diff2, radius=int(l_longest*r))
             l = len(path)
             dtw_norm_diff = dtw_val/l
 
-            line =f"{qi},{rj},{dtw_norm},{dtw_norm_diff}"
+            line =f"{qi},{rj},{dtw_norm},{dtw_norm_mean},{dtw_norm_diff}"
             #all_distances = all_distances.append({
             #   'index1':i,
             #   'index2':j,

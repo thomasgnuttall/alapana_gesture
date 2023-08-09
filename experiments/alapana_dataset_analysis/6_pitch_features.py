@@ -13,9 +13,9 @@ import dtaidistance.dtw
 import soundfile as sf
 from experiments.alapana_dataset_analysis.dtw import dtw_path
 from scipy.ndimage import gaussian_filter1d
-
+from scipy.signal import savgol_filter
 import librosa
-
+from librosa.feature import spectral_centroid
 r = 0.1
 sr=44100
 run_name = 'result_0.1'
@@ -123,6 +123,7 @@ def compute_novelty_spectrum(x, Fs=44100, N=1024, H=512, gamma=200.0, M=10, norm
             novelty_spectrum = novelty_spectrum / max_value
     return novelty_spectrum, Fs_feature
 
+mel = lambda f: 1/np.log(2) * (np.log(1 + (f/1000))) * 1000
 
 # distance from tonic tracks
 dtonic_tracks = {}
@@ -154,8 +155,11 @@ for t in all_groups['track'].unique():
     wl = wl if not wl%2 == 0 else wl+1
     centroid125 = savgol_filter(centroid, polyorder=2, window_length=wl, mode='interp')
 
+    centroid125[centroid125<0] = 0
+    centroidmel = np.array([mel(f) for f in centroid])
+
     #spectral_flux, fs_feature = compute_novelty_spectrum(y)
-    sc_tracks[t] = (centroid125, sc_timestep)
+    sc_tracks[t] = (centroidmel, sc_timestep)
 
     # Distance from tonic
     sameoctave = pitch%1200
@@ -259,7 +263,7 @@ with open(audio_distances_path,'a') as file:
 
                 l_longest = max([p1l, p2l])
                 
-                path, dtw_val = dtw_path(pat1_loudness, pat2_loudness, radius=r)
+                path, dtw_val = dtw_path(pat1_loudness, pat2_loudness, radius=r, norm=True)
                 l = len(path)
                 loudness_dtw = dtw_val/l
                 
@@ -277,7 +281,7 @@ with open(audio_distances_path,'a') as file:
                 p2l = len(pat2_sf)
 
                 l_longest = max([p1l, p2l])
-                path, dtw_val = dtw_path(pat1_sf, pat2_sf, radius=r)
+                path, dtw_val = dtw_path(pat1_sf, pat2_sf, radius=r, norm=True)
                 l = len(path)
                 dsf_dtw = dtw_val/l
 

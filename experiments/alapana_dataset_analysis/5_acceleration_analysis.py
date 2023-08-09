@@ -7,7 +7,7 @@ import fastdtw
 
 import dtaidistance.dtw
 from experiments.alapana_dataset_analysis.dtw import dtw_path, dtw_dtai
-from exploration.io import write_pkl
+from exploration.io import write_pkl, load_pkl
 from scipy.signal import savgol_filter
 
 run_name = 'result_0.1'
@@ -48,6 +48,7 @@ def pivot_mocap(df):
         columns=['segment']).reset_index()
 
     return df
+
 
 def force_right_handed(df, is_right):
     columns = list(df.columns)
@@ -134,7 +135,7 @@ def rotate(point, angle):
     return qx, qy, pz
 
 
-def get_motion_distance(i, j, feature):
+def get_motion_distance(i, j, feature, norm):
     try:
         i_vec = index_features[i][feature]#get_motion_data(i, level, feature, handi, num_dims=num_dims, pelvis=pelvis1, angle=angle1)
         j_vec = index_features[j][feature]#get_motion_data(j, level, feature, handj, num_dims=num_dims, pelvis=pelvis2, angle=angle2)
@@ -145,7 +146,7 @@ def get_motion_distance(i, j, feature):
 
         #dtw_val, path = dtaidistance.dtw_ndim.distance(i_vec, j_vec, window=round(l_longest*0.20), psi=round(l_longest*0.20), use_c=True)
         #dtw_val, path = fastdtw.fastdtw(i_vec, j_vec, dist=None, radius=round(l_longest*0.20))
-        path, dtw_val = dtw_path(i_vec, j_vec, radius=round(l_longest*r))
+        path, dtw_val = dtw_path(i_vec, j_vec, radius=round(l_longest*r), norm=norm)
 
         return dtw_val/len(path)
     except Exception as e:
@@ -154,7 +155,7 @@ def get_motion_distance(i, j, feature):
 
 
 # Palm, wrist, elbow, shoulder
-desirable_segments = ['Seg_1', 'Seg_10', 'Seg_11', 'Seg_14', 'Seg_15', 'Seg_8', 'Seg_12', 'Seg_7']
+desirable_segments = ['Seg_1', 'Seg_10', 'Seg_11', 'Seg_14', 'Seg_15', 'Seg_8', 'Seg_12', 'Seg_7', 'Seg_6']
 
 mocap_dir = '/Volumes/MyPassport/gesture_network_data/mocap/position_velocity_acceleration/'
 
@@ -238,6 +239,7 @@ def add_centroid(distances, all_groups, feature, performance):
 
 
 distances = add_centroid(distances, all_groups, 'Pelvis', False)
+distances = add_centroid(distances, all_groups, 'Neck', True)
 distances = add_centroid(distances, all_groups, 'RightShoulder', True)
 distances = add_centroid(distances, all_groups, 'LeftShoulder', True)
 distances = add_centroid(distances, all_groups, 'Head', False)
@@ -248,10 +250,14 @@ distances = add_centroid(distances, all_groups, 'LeftHand', False)
 distances2 = distances
 # Angle
 theta = lambda x0, y0, x1, y1: np.arctan2((y1 - y0), (x1 - x0))
+# distance
+from scipy.spatial import distance
+
 distances2['angle1'] = distances2.apply(lambda y: theta(y.RightShoulder1[0], y.RightShoulder1[1], y.LeftShoulder1[0], y.LeftShoulder1[1]), axis=1)
 distances2['angle2'] = distances2.apply(lambda y: theta(y.RightShoulder2[0], y.RightShoulder2[1], y.LeftShoulder2[0], y.LeftShoulder2[1]), axis=1)
 
 all_groups['angle'] = all_groups.apply(lambda y: theta(y.RightShoulder_centroid[0], y.RightShoulder_centroid[1], y.LeftShoulder_centroid[0], y.LeftShoulder_centroid[1]), axis=1)
+all_groups['height'] = all_groups.apply(lambda y: abs(distance.euclidean(y.Head_centroid, y.Pelvis_centroid)), axis=1)
 
 features = [
     ('1daccelerationDTWHand','Acceleration'),
@@ -287,6 +293,7 @@ for i, row in tqdm.tqdm(list(all_groups.iterrows())):
     handedness = row['handedness']
     handedness_ratio = row['handedness_ratio']
     pelvis = row['pelvis_centroid']
+    head = row['Head_centroid']
     HandEnergy = row['HandEnergy']
     pelvis = row['Pelvis_centroid']
     RightShoulder_centroid = row['RightShoulder_centroid']
@@ -295,6 +302,7 @@ for i, row in tqdm.tqdm(list(all_groups.iterrows())):
     RightHand_centroid = row['RightHand_centroid']
     LeftHand_centroid = row['LeftHand_centroid']
     angle = row['angle']
+    height = row['height']
     
     for feature, level in features:
 
@@ -322,6 +330,11 @@ for i, row in tqdm.tqdm(list(all_groups.iterrows())):
             this_frame['x'] = this_frame['x'].apply(lambda y: y-pelvis[0])
             this_frame['y'] = this_frame['y'].apply(lambda y: y-pelvis[1])
             this_frame['z'] = this_frame['z'].apply(lambda y: y-pelvis[2])
+
+            #if feature_name == 'Head':
+            #    this_frame['x'] = this_frame['x'].apply(lambda y: y/height)
+            #    this_frame['y'] = this_frame['y'].apply(lambda y: y/height)
+            #    this_frame['z'] = this_frame['z'].apply(lambda y: y/height)
 
 
         this_frame.columns = this_frame.columns.droplevel()
@@ -352,60 +365,69 @@ for i, row in tqdm.tqdm(list(all_groups.iterrows())):
             vectors[:,1] = savgol_filter(vectors[:,1], polyorder=2, window_length=wl, mode='interp')
             vectors[:,2] = savgol_filter(vectors[:,2], polyorder=2, window_length=wl, mode='interp')
 
-
         index_features[index][feature] = vectors
 
 
 index_features_path = f'/Volumes/MyPassport/FOR_LARA/{run_name}/index_features.pkl'
+#index_features = load_pkl(index_features_path)
+
 write_pkl(index_features, index_features_path)
 
 
 print("acceleration hand")
 print('    1d dtw')
-distances2['1daccelerationDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1daccelerationDTWHand'), axis=1)
+distances2['1daccelerationDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1daccelerationDTWHand', norm=False), axis=1)
 #print('    2d dtw')
-#distances2['2daccelerationDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2daccelerationDTWHand'), axis=1)
+#distances2['2daccelerationDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2daccelerationDTWHand', norm=False), axis=1)
 print('    3d dtw')
-distances2['3daccelerationDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3daccelerationDTWHand'), axis=1)
+distances2['3daccelerationDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3daccelerationDTWHand', norm=False), axis=1)
 
 #print("velocity forearm")
 #print('    1d dtw')
-#distances2['1dvelocityDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1dvelocityDTWForearm'), axis=1)
+#distances2['1dvelocityDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1dvelocityDTWForearm', norm=False), axis=1)
 ##print('    2d dtw')
-##distances2['2dvelocityDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2dvelocityDTWForearm'), axis=1)
+##distances2['2dvelocityDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2dvelocityDTWForearm', norm=False), axis=1)
 #print('    3d dtw')
-#distances2['3dvelocityDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3dvelocityDTWForearm'), axis=1)
+#distances2['3dvelocityDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3dvelocityDTWForearm', norm=False), axis=1)
 
 
 
 print("velocity hand")
 print('    1d dtw')
-distances2['1dvelocityDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1dvelocityDTWHand'), axis=1)
+distances2['1dvelocityDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1dvelocityDTWHand', norm=False), axis=1)
 #print('    2d dtw')
-#distances2['2dvelocityDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2dvelocityDTWHand'), axis=1)
+#distances2['2dvelocityDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2dvelocityDTWHand', norm=False), axis=1)
 print('    3d dtw')
-distances2['3dvelocityDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3dvelocityDTWHand'), axis=1)
+distances2['3dvelocityDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3dvelocityDTWHand', norm=False), axis=1)
 
 
 
 #print("position forearm")
 #print('    1d dtw')
-#distances2['1dpositionDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1dpositionDTWForearm'), axis=1)
+#distances2['1dpositionDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1dpositionDTWForearm', norm=False), axis=1)
 #print('    2d dtw')
-#distances2['2dpositionDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2dpositionDTWForearm'), axis=1)
+#distances2['2dpositionDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2dpositionDTWForearm', norm=False), axis=1)
 #print('    3d dtw')
-#distances2['3dpositionDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3dpositionDTWForearm'), axis=1)
+#distances2['3dpositionDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3dpositionDTWForearm', norm=False), axis=1)
 
 
 
 print("position hand")
 print('    1d dtw')
-distances2['1dpositionDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1dpositionDTWHand'), axis=1)
+distances2['1dpositionDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1dpositionDTWHand', norm=False), axis=1)
 #print('    2d dtw')
-#distances2['2dpositionDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2dpositionDTWHand'), axis=1)
+#distances2['2dpositionDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2dpositionDTWHand', norm=False), axis=1)
 print('    3d dtw')
-distances2['3dpositionDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3dpositionDTWHand'), axis=1)
+distances2['3dpositionDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3dpositionDTWHand', norm=False), axis=1)
 
+
+print("position hand")
+print('    1d dtw')
+distances2['1dpositionDTWHand_mean'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1dpositionDTWHand', norm=True), axis=1)
+#print('    2d dtw')
+#distances2['2dpositionDTWHand'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2dpositionDTWHand', norm=False), axis=1)
+print('    3d dtw')
+distances2['3dpositionDTWHand_mean'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3dpositionDTWHand', norm=True), axis=1)
 
 
 
@@ -423,49 +445,49 @@ distances2['3dpositionDTWHand'] = distances2.apply(lambda y: get_motion_distance
 
 print("acceleration Head")
 print('    1d dtw')
-distances2['1daccelerationDTWHead'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1daccelerationDTWHead'), axis=1)
+distances2['1daccelerationDTWHead'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1daccelerationDTWHead', norm=False), axis=1)
 #print('    2d dtw')
-#distances2['2daccelerationDTWHead'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2daccelerationDTWHead'), axis=1)
+#distances2['2daccelerationDTWHead'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2daccelerationDTWHead', norm=False), axis=1)
 print('    3d dtw')
-distances2['3daccelerationDTWHead'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3daccelerationDTWHead'), axis=1)
+distances2['3daccelerationDTWHead'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3daccelerationDTWHead', norm=False), axis=1)
 
 #print("velocity forearm")
 #print('    1d dtw')
-#distances2['1dvelocityDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1dvelocityDTWForearm'), axis=1)
+#distances2['1dvelocityDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1dvelocityDTWForearm', norm=False), axis=1)
 ##print('    2d dtw')
-##distances2['2dvelocityDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2dvelocityDTWForearm'), axis=1)
+##distances2['2dvelocityDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2dvelocityDTWForearm', norm=False), axis=1)
 #print('    3d dtw')
-#distances2['3dvelocityDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3dvelocityDTWForearm'), axis=1)
+#distances2['3dvelocityDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3dvelocityDTWForearm', norm=False), axis=1)
 
 
 
 print("velocity Head")
 print('    1d dtw')
-distances2['1dvelocityDTWHead'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1dvelocityDTWHead'), axis=1)
+distances2['1dvelocityDTWHead'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1dvelocityDTWHead', norm=False), axis=1)
 #print('    2d dtw')
-#distances2['2dvelocityDTWHead'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2dvelocityDTWHead'), axis=1)
+#distances2['2dvelocityDTWHead'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2dvelocityDTWHead', norm=False), axis=1)
 print('    3d dtw')
-distances2['3dvelocityDTWHead'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3dvelocityDTWHead'), axis=1)
+distances2['3dvelocityDTWHead'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3dvelocityDTWHead', norm=False), axis=1)
 
 
 
 #print("position forearm")
 #print('    1d dtw')
-#distances2['1dpositionDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1dpositionDTWForearm'), axis=1)
+#distances2['1dpositionDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1dpositionDTWForearm', norm=False), axis=1)
 #print('    2d dtw')
-#distances2['2dpositionDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2dpositionDTWForearm'), axis=1)
+#distances2['2dpositionDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2dpositionDTWForearm', norm=False), axis=1)
 #print('    3d dtw')
-#distances2['3dpositionDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3dpositionDTWForearm'), axis=1)
+#distances2['3dpositionDTWForearm'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3dpositionDTWForearm', norm=False), axis=1)
 
 
 
 print("position Head")
 print('    1d dtw')
-distances2['1dpositionDTWHead'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1dpositionDTWHead'), axis=1)
+distances2['1dpositionDTWHead'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'1dpositionDTWHead', norm=True), axis=1)
 #print('    2d dtw')
-#distances2['2dpositionDTWHead'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2dpositionDTWHead'), axis=1)
+#distances2['2dpositionDTWHead'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'2dpositionDTWHead', norm=True), axis=1)
 print('    3d dtw')
-distances2['3dpositionDTWHead'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3dpositionDTWHead'), axis=1)
+distances2['3dpositionDTWHead'] = distances2.apply(lambda y: get_motion_distance(y['index1'], y['index2'],'3dpositionDTWHead', norm=True), axis=1)
 
 
 
@@ -495,14 +517,14 @@ distances2['performer1'] = distances2['performance1'].apply(lambda y: y.split('_
 distances2['performer2'] = distances2['performance2'].apply(lambda y: y.split('_')[0])
 
 # order cols
-distances2 = distances2[[
+distances2 = distances2[[x for x in [
        'index1', 'index2', 'length1', 'length2', 'performer1', 'performer2', 'performance1', 'performance2', 'pitch_dtw', 'diff_pitch_dtw',
        '1dpositionDTWHand', '3dpositionDTWHand',
        '1dvelocityDTWHand', '3dvelocityDTWHand',
        '1daccelerationDTWHand', '3daccelerationDTWHand',
         '1dpositionDTWHead', '3dpositionDTWHead',
        '1dvelocityDTWHead', '3dvelocityDTWHead',
-       '1daccelerationDTWHead', '3daccelerationDTWHead']]
+       '1daccelerationDTWHead', '3daccelerationDTWHead'] if x in distances2.columns]]
 
 distances2.to_csv(gest_path, index=False)
 

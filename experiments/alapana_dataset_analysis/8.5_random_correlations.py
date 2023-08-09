@@ -17,11 +17,9 @@ index_features_path = os.path.join(out_dir, 'index_features.pkl')
 all_groups_path = os.path.join(out_dir, 'all_groups.csv')
 audio_features_path = os.path.join(out_dir, 'audio_distances.csv')
 results_dir = os.path.join(out_dir, 'analysis', '')
-results_df_path = os.path.join(results_dir, 'results.csv')
-sig_results_df_path = os.path.join(results_dir, 'results_significant.csv')
-all_feature_path = os.path.join(out_dir, 'all_features.csv')
+merged_path = os.path.join(results_dir, 'results_with_random.csv')
+sig_results_df_path = os.path.join(results_dir, 'results.csv')
 
-create_if_not_exists(results_df_path)
 
 # load data
 distances = pd.read_csv(distances_path)
@@ -56,6 +54,9 @@ audio_distance = distances.merge(audio_features, on=['index1', 'index2'])
 
 targets = pitch_targets + audio_targets
 
+for f in features:
+    audio_distance[f] = audio_distance[f].sample(frac=1).values
+
 ## Remove mismatched length for analysis
 ########################################
 def len_mismatch(l1, l2):
@@ -67,8 +68,6 @@ def len_mismatch(l1, l2):
 audio_distance['length_mismatch'] = audio_distance.apply(lambda y: len_mismatch(y.length1, y.length2), axis=1)
 
 audio_distance_cut = audio_distance[audio_distance['length_mismatch']!=True]
-
-audio_distance.to_csv(all_feature_path, index=False)
 
 audio_distance_cut = audio_distance_cut.merge(all_groups[['index','include_in_all']], left_on='index1', right_on='index')
 del audio_distance_cut['index']
@@ -123,45 +122,16 @@ for x in targets:
 
 results = results.sort_values(by='corr', ascending=False)
 
-results.to_csv(results_df_path, index=False)
+results = results[results['n']>109]
 
-## Best Results
-###############
-# For 70% of estimates to be within +/- 0.1 of the true correlation value (between -0.1 and 0.1), we need at least 109 observations
-# for 90% of estimates to be within +/- 0.2 of the true correlation value (between -0.2 and 0.2), we need at least 70 observations. 
-p = 0.01
-significant_results = results[(results['p']<=p) & (results['n']>109)]
-significant_results.to_csv(sig_results_df_path, index=False)
 
-## Plots
-########
-for i, row in tqdm.tqdm(list(significant_results.iterrows())):
-    x = row['x']
-    y = row['y']
-    level = row['level']
-    level_value = row['level_value']
-    corr = row['corr']
-    p = row['p']
-    n = row['n']
+## Get real results
+####################
 
-    level_str = f'{level}={level_value}' if level != 'all' else level
-    title = f'{x} against {y} for {level_str}'
-    title += f'\n [spearmans R={round(corr,3)}, p={round(p,3)}, n={n}]'
-    
-    out_path = os.path.join(results_dir, 'plots', x, y, level, (level if level == 'all' else str(level_value)) + '.png')
-    create_if_not_exists(out_path)
+real_results = pd.read_csv(sig_results_df_path)
 
-    if level != 'all':
-        cols = [x for x in audio_distance_cut.columns if level in x]
-        data = audio_distance_cut[(audio_distance_cut[cols[0]]==level_value) & (audio_distance_cut[cols[1]]==level_value)]
-    else:
-        data = audio_distance_cut
+merged = real_results.merge(results, on=['x','y','level','level_value'], suffixes=['_real', '_random'])
+merged['corr_ratio'] = merged['corr_real']/merged['corr_random']
 
-    pl = sns.scatterplot(data, x=x, y=y, s=5)
-    pl.set_title(title)
-    fig = pl.get_figure()
-    fig.savefig(out_path)
-    plt.cla()
-    plt.clf()
-    plt.close()
 
+merged.to_csv(merged_path, index=False)

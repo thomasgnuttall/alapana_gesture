@@ -32,24 +32,24 @@ pitch_targets = ['pitch_dtw', 'diff_pitch_dtw']
 audio_targets = ['loudness_dtw',  'spectral_centroid']
 
 features = [
-       '3dpositionDTWHand',
-       '3dvelocityDTWHand',
-       '3daccelerationDTWHand',
-       '3dpositionDTWHead',
-       '3dvelocityDTWHead', 
-       '3daccelerationDTWHead'
-]
+       '1dpositionDTWHand',
+       '3dpositionDTWHand', '1dvelocityDTWHand',
+       '3dvelocityDTWHand', '1daccelerationDTWHand',
+       '3daccelerationDTWHand','1dpositionDTWHead',
+       '3dpositionDTWHead', '1dvelocityDTWHead',
+       '3dvelocityDTWHead', '1daccelerationDTWHead',
+       '3daccelerationDTWHead']
 
 audio_distance = distances.merge(audio_features, on=['index1', 'index2'])
 
 targets = pitch_targets + audio_targets
 
-## Regression
-levels = ['all', 'performer']
 
 for f in features:
     audio_distance[f] = audio_distance[f].sample(frac=1).values
 
+## Regression
+levels = ['all', 'performer']
 
 for scoring in ['r2']:
   results = pd.DataFrame(columns=['target', 'level', 'level_value', 'test_score', 'train_score', 'best_params', 'n_samples'])
@@ -79,9 +79,9 @@ for scoring in ['r2']:
                         # a model for each combination of the following parameters
                         # selecting the best as it is evaluated on our training set
                         all_params = {
-                            "n_estimators": [150],#[50, 100, 150],
-                            'learning_rate': [0.01],#[0.001, 0.01],
-                            'max_depth': [8, 10]
+                            "n_estimators": [50, 100, 150],
+                            'learning_rate': [0.001, 0.01],
+                            'max_depth': [2, 4, 8, 10]
                         }
 
                         # Initialise predictor

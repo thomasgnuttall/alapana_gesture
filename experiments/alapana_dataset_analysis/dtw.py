@@ -7,6 +7,8 @@ from exploration.io import create_if_not_exists
 from matplotlib.ticker import NullFormatter, FormatStrFormatter
 import matplotlib.pyplot as plt
 
+from scipy.stats import zscore
+
 def line(x0, y0, x1, y1):
         "Bresenham's line algorithm"
         points_in_line = []
@@ -88,7 +90,7 @@ def sc_mask(sz1, sz2, radius=1):
     return mask
  
 
-def dtw_path(s1, s2, radius):
+def dtw_path(s1, s2, radius, norm=False):
     r"""Compute Dynamic Time Warping (DTW) similarity measure between
     (possibly multidimensional) time series and return both the path and the
     similarity.
@@ -165,6 +167,10 @@ def dtw_path(s1, s2, radius):
 
     if s1.shape[1] != s2.shape[1]:
         raise ValueError("All input time series must have the same feature size.")
+
+    if norm:
+        s1 = (s1-s1.mean(axis=0)) #/s1.std()
+        s2 = (s2-s2.mean(axis=0)) #/s2.std()
 
     sz1 = s1.shape[0]
     sz2 = s2.shape[0]
@@ -368,11 +374,11 @@ def plot_dtw(pat1, pat2, path_dtw, dtw_norm, r, write):
 
     axplot.set_xlim((0, len(pat1)))
     axplot.set_ylim((0, len(pat2)))
-    axplot.tick_params(axis='both', which='major', labelsize=18)
+    axplot.tick_params(axis='both', which='major', labelsize=8)
 
     # Plot time serie horizontal
     axx.plot(pat1, color='k')
-    axx.tick_params(axis='both', which='major', labelsize=18)
+    axx.tick_params(axis='both', which='major', labelsize=8)
     xloc = plt.MaxNLocator(4)
     x2Formatter = FormatStrFormatter('%d')
     axx.yaxis.set_major_locator(xloc)
@@ -385,7 +391,7 @@ def plot_dtw(pat1, pat2, path_dtw, dtw_norm, r, write):
     xFormatter = FormatStrFormatter('%d')
     axy.xaxis.set_major_locator(yloc)
     axy.xaxis.set_major_formatter(xFormatter)
-    axy.tick_params(axis='both', which='major', labelsize=18)
+    axy.tick_params(axis='both', which='major', labelsize=8)
 
     # Limits
     axx.set_xlim(axplot.get_xlim())
